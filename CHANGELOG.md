@@ -1,3 +1,65 @@
+## 0.1.39
+
+- **Bug Fix**: Fix `showOverlays` parameter not hiding native platform bounding boxes
+  - **Flutter**: Added `showOverlays` parameter to creation parameters passed to native code
+  - **Flutter**: Added `setShowOverlays()` method to `YOLOViewController` for dynamic overlay control
+  - **iOS**: Added `showOverlays` property to `YOLOView` class with getter/setter
+  - **iOS**: Modified bounding box rendering logic to respect `showOverlays` parameter
+  - **iOS**: Added `setShowOverlays` method channel handler in `SwiftYOLOPlatformView`
+  - **Android**: Added `showOverlays` property and `setShowOverlays()` method to `YOLOView` class
+  - **Android**: Modified `onDraw()` method to check `showOverlays` before drawing overlays
+  - **Android**: Added `setShowOverlays` method channel handler in `YOLOPlatformView`
+  - **Usage**: `YOLOView(showOverlays: false)` now properly hides both Flutter and native overlays
+  - **Dynamic Control**: Use `yoloController.setShowOverlays(false)` to toggle overlays at runtime
+
+## 0.1.38
+
+- **Bug Fix**: iOS performance metrics not updating in `YOLOView`
+  - Moved EventChannel subscription from `initState` to `_onPlatformViewCreated` to ensure native channel readiness on iOS
+  - Aligned streaming config key with iOS by renaming `throttleInterval` to `throttleIntervalMs` when sending params
+  - iOS now sources performance metrics from the latest inference result: `processingTimeMs = result.speed * 1000`, `fps = result.fps`
+  - Added fallback to `YOLOStreamConfig.DEFAULT` when stream config is nil on iOS
+  - Minor cleanup in `SwiftYOLOPlatformView.swift` for streamlined event dispatch
+
+- **Example App**
+  - Camera Inference Screen fixes for Detection and FPS
+
+## 0.1.37
+
+- **Critical Update**: Add Android 16KB page size support for Android 15+ compatibility
+  - Upgraded to NDK r28 for automatic 16KB page size alignment
+  - Updated Google AI Edge LiteRT (TensorFlow Lite) from 1.2.0 to 1.4.0
+  - Ensured compatibility with Google Play's November 2025 requirement
+  - Native libraries now support both 4KB (current) and 16KB (future) page sizes
+  - Updated Android Gradle Plugin to 8.5.2 and Gradle to 8.7
+
+## 0.1.36
+
+- **New Feature**: implement UI controls on Android platform
+
+## 0.1.35
+
+- **Bug Fix**: Fix iOS numItemsThreshold inconsistency with Android
+
+## 0.1.34
+
+- **Bug Fix**: Fix originalImage being null in onStreamingData callback
+  - Fixed issue where `originalImage` was consistently null despite `includeOriginalImage: true` being set
+  - Capture original image data in BasePredictor before clearing currentBuffer
+
+## 0.1.33
+
+- **Bug Fix**: Fix setState callback issue in YOLOView
+  - Fixed issue where `onResult` and `onStreamingData` callbacks would stop working after `setState` calls
+  - Improved `didUpdateWidget` logic to prevent unnecessary subscription recreation when callbacks are functionally equivalent
+  - Added subscription existence check to avoid recreating working subscriptions
+  - Fixed Android compilation errors related to YOLOStreamConfig and method access
+
+## 0.1.32
+
+- **Bug Fix**: Fix Android crash in YOLOInstanceManager
+  - Added compatibility methods for better API consistency
+
 ## 0.1.31
 
 - **New Feature**: Add `useGpu` parameter for GPU acceleration control

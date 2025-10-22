@@ -40,11 +40,9 @@ class Classifier: BasePredictor {
 
     if let observation = request.results as? [VNCoreMLFeatureValueObservation] {
 
-      // Get the MLMultiArray from the observation
       let multiArray = observation.first?.featureValue.multiArrayValue
 
       if let multiArray = multiArray {
-        // Initialize an array to store the classes
         var valuesArray = [Double]()
         for i in 0..<multiArray.count {
           let value = multiArray[i].doubleValue
@@ -85,10 +83,7 @@ class Classifier: BasePredictor {
       var top5: [String] = []
       var top5Confs: [Float] = []
 
-      var candidateNumber = 5
-      if observations.count < candidateNumber {
-        candidateNumber = observations.count
-      }
+      var candidateNumber = min(5, observations.count)
       if let topObservation = observations.first {
         top1 = topObservation.identifier
         top1Conf = Float(topObservation.confidence)
@@ -112,9 +107,14 @@ class Classifier: BasePredictor {
 
     self.currentOnInferenceTimeListener?.on(inferenceTime: self.t2 * 1000, fpsRate: 1 / self.t4)  // t2 seconds to ms
     //                self.currentOnFpsRateListener?.on(fpsRate: 1 / self.t4)
-    let result = YOLOResult(
+    var result = YOLOResult(
       orig_shape: inputSize, boxes: [], probs: probs, speed: self.t2, fps: 1 / self.t4,
       names: labels)
+
+    if let originalImageData = self.originalImageData {
+      result.originalImage = UIImage(data: originalImageData)
+
+    }
 
     self.currentOnResultsListener?.on(result: result)
 
@@ -136,11 +136,9 @@ class Classifier: BasePredictor {
       if let observation = request.results as? [VNCoreMLFeatureValueObservation] {
         var recognitions: [[String: Any]] = []
 
-        // Get the MLMultiArray from the observation
         let multiArray = observation.first?.featureValue.multiArrayValue
 
         if let multiArray = multiArray {
-          // Initialize an array to store the classes
           var valuesArray = [Double]()
           for i in 0..<multiArray.count {
             let value = multiArray[i].doubleValue

@@ -24,8 +24,10 @@ public class YOLOView: UIView, VideoCaptureDelegate {
     self.currentFps = fps
     self.currentProcessingTime = speed
 
-    DispatchQueue.main.async {
-      self.labelFPS.text = String(format: "%.1f FPS - %.1f ms", fps, speed)  // t2 seconds to ms
+    if showUIControls {
+      DispatchQueue.main.async {
+        self.labelFPS.text = String(format: "%.1f FPS - %.1f ms", fps, speed)  // t2 seconds to ms
+      }
     }
   }
 
@@ -33,7 +35,6 @@ public class YOLOView: UIView, VideoCaptureDelegate {
 
     // Check if we should process inference result based on frequency control
     if !shouldRunInference() {
-      print("YOLOView: Skipping inference result due to frequency control")
       return
     }
 
@@ -54,9 +55,6 @@ public class YOLOView: UIView, VideoCaptureDelegate {
         frameNumberCounter += 1
 
         streamCallback(enhancedStreamData)
-        print("YOLOView: Sent streaming data with \(result.boxes.count) detections")
-      } else {
-        print("YOLOView: Skipping frame output due to throttling")
       }
     }
 
@@ -175,6 +173,17 @@ public class YOLOView: UIView, VideoCaptureDelegate {
     }
   }
 
+  // Flag to control bounding box overlay visibility
+  private var _showOverlays: Bool = true
+
+  /// Property to get or set the visibility of bounding box overlays
+  public var showOverlays: Bool {
+    get { return _showOverlays }
+    set {
+      _showOverlays = newValue
+    }
+  }
+
   let obbRenderer = OBBRenderer()
 
   private let minimumZoom: CGFloat = 1.0
@@ -229,8 +238,6 @@ public class YOLOView: UIView, VideoCaptureDelegate {
     task: YOLOTask,
     completion: ((Result<Void, Error>) -> Void)? = nil
   ) {
-    print("YOLOView.setModel: Received modelPath: \(modelPathOrName)")
-
     activityIndicator.startAnimating()
     boundingBoxViews.forEach { box in
       box.hide()
@@ -285,11 +292,16 @@ public class YOLOView: UIView, VideoCaptureDelegate {
     func handleSuccess(predictor: Predictor) {
       // Release old predictor before setting new one to prevent memory leak
       if self.videoCapture.predictor != nil {
-        print("YOLOView: Releasing old predictor before setting new one")
         self.videoCapture.predictor = nil
       }
 
       self.videoCapture.predictor = predictor
+
+      // Set stream configuration for original image capture
+      if let basePredictor = predictor as? BasePredictor {
+        basePredictor.streamConfig = self.streamConfig
+      }
+
       self.activityIndicator.stopAnimating()
       self.labelName.text = modelName
       completion?(.success(()))
@@ -531,8 +543,10 @@ public class YOLOView: UIView, VideoCaptureDelegate {
         ratio = (height / width) / (16.0 / 9.0)
       }
 
-      self.labelSliderNumItems.text =
-        String(resultCount) + " items (max " + String(Int(sliderNumItems.value)) + ")"
+      if showUIControls {
+        self.labelSliderNumItems.text =
+          String(resultCount) + " items (max " + String(Int(sliderNumItems.value)) + ")"
+      }
       for i in 0..<boundingBoxViews.count {
         if i < (resultCount) && i < 50 {
           var rect = CGRect.zero
@@ -617,8 +631,12 @@ public class YOLOView: UIView, VideoCaptureDelegate {
           }
           displayRect = VNImageRectForNormalizedRect(displayRect, Int(width), Int(height))
 
-          boundingBoxViews[i].show(
-            frame: displayRect, label: label, color: boxColor, alpha: alpha)
+          if _showOverlays {
+            boundingBoxViews[i].show(
+              frame: displayRect, label: label, color: boxColor, alpha: alpha)
+          } else {
+            boundingBoxViews[i].hide()
+          }
 
         } else {
           boundingBoxViews[i].hide()
@@ -626,8 +644,10 @@ public class YOLOView: UIView, VideoCaptureDelegate {
       }
     } else {
       resultCount = predictions.boxes.count
-      self.labelSliderNumItems.text =
-        String(resultCount) + " items (max " + String(Int(sliderNumItems.value)) + ")"
+      if showUIControls {
+        self.labelSliderNumItems.text =
+          String(resultCount) + " items (max " + String(Int(sliderNumItems.value)) + ")"
+      }
 
       let frameAspectRatio = videoCapture.longSide / videoCapture.shortSide
       let viewAspectRatio = width / height
@@ -694,12 +714,16 @@ public class YOLOView: UIView, VideoCaptureDelegate {
           rect.size.width *= videoCapture.longSide * scaleX
           rect.size.height *= videoCapture.shortSide * scaleY
 
-          boundingBoxViews[i].show(
-            frame: rect,
-            label: label,
-            color: boxColor,
-            alpha: alpha
-          )
+          if _showOverlays {
+            boundingBoxViews[i].show(
+              frame: rect,
+              label: label,
+              color: boxColor,
+              alpha: alpha
+            )
+          } else {
+            boundingBoxViews[i].hide()
+          }
         } else {
           boundingBoxViews[i].hide()
         }
@@ -822,7 +846,9 @@ public class YOLOView: UIView, VideoCaptureDelegate {
     sliderIoU.addTarget(self, action: #selector(sliderChanged), for: .valueChanged)
     self.addSubview(sliderIoU)
 
-    self.labelSliderNumItems.text = "0 items (max " + String(Int(sliderNumItems.value)) + ")"
+    if showUIControls {
+      self.labelSliderNumItems.text = "0 items (max " + String(Int(sliderNumItems.value)) + ")"
+    }
     self.labelSliderConf.text = "0.25 Confidence Threshold"
     self.labelSliderIoU.text = "0.45 IoU Threshold"
 
@@ -1090,19 +1116,19 @@ public class YOLOView: UIView, VideoCaptureDelegate {
   @objc func sliderChanged(_ sender: Any) {
 
     if sender as? UISlider === sliderNumItems {
-      if let detector = videoCapture.predictor as? ObjectDetector {
+      if let basePredictor = videoCapture.predictor as? BasePredictor {
         let numItems = Int(sliderNumItems.value)
-        detector.setNumItemsThreshold(numItems: numItems)
+        basePredictor.setNumItemsThreshold(numItems: numItems)
       }
     }
     let conf = Double(round(100 * sliderConf.value)) / 100
     let iou = Double(round(100 * sliderIoU.value)) / 100
     self.labelSliderConf.text = String(conf) + " Confidence Threshold"
     self.labelSliderIoU.text = String(iou) + " IoU Threshold"
-    if let detector = videoCapture.predictor as? ObjectDetector {
-      detector.setIouThreshold(iou: iou)
-      detector.setConfidenceThreshold(confidence: conf)
-
+    // Apply thresholds to all predictor types via BasePredictor
+    if let basePredictor = videoCapture.predictor as? BasePredictor {
+      basePredictor.setIouThreshold(iou: iou)
+      basePredictor.setConfidenceThreshold(confidence: conf)
     }
   }
 
@@ -1235,8 +1261,6 @@ public class YOLOView: UIView, VideoCaptureDelegate {
   }
 
   deinit {
-    print("YOLOView: deinit called - stopping camera capture")
-
     // Ensure camera is stopped when view is deallocated
     videoCapture.stop()
 
@@ -1253,8 +1277,6 @@ public class YOLOView: UIView, VideoCaptureDelegate {
 
     // Remove notification observers
     NotificationCenter.default.removeObserver(self)
-
-    print("YOLOView: deinit completed")
   }
 }
 
@@ -1441,8 +1463,6 @@ extension YOLOView: AVCapturePhotoCaptureDelegate {
       }
       photoCaptureCompletion?(img)
       photoCaptureCompletion = nil
-    } else {
-      print("AVCapturePhotoCaptureDelegate Error")
     }
   }
 
@@ -1452,13 +1472,11 @@ extension YOLOView: AVCapturePhotoCaptureDelegate {
   public func setStreamConfig(_ config: YOLOStreamConfig?) {
     self.streamConfig = config
     setupThrottlingFromConfig()
-    print("YOLOView: Streaming config set: \(String(describing: config))")
   }
 
   /// Set streaming callback
   public func setStreamCallback(_ callback: (([String: Any]) -> Void)?) {
     self.onStream = callback
-    print("YOLOView: Streaming callback set: \(callback != nil)")
   }
 
   /// Setup throttling parameters from streaming configuration
@@ -1468,43 +1486,36 @@ extension YOLOView: AVCapturePhotoCaptureDelegate {
     // Setup maxFPS throttling (for result output)
     if let maxFPS = config.maxFPS, maxFPS > 0 {
       targetFrameInterval = 1.0 / Double(maxFPS)  // Convert to seconds
-      print(
-        "YOLOView: maxFPS throttling enabled - target FPS: \(maxFPS), interval: \(targetFrameInterval! * 1000)ms"
-      )
     } else {
       targetFrameInterval = nil
-      print("YOLOView: maxFPS throttling disabled")
+
     }
 
     // Setup throttleInterval (for result output)
     if let throttleMs = config.throttleIntervalMs, throttleMs > 0 {
       throttleInterval = Double(throttleMs) / 1000.0  // Convert ms to seconds
-      print("YOLOView: throttleInterval enabled - interval: \(throttleMs)ms")
+
     } else {
       throttleInterval = nil
-      print("YOLOView: throttleInterval disabled")
+
     }
 
     // Setup inference frequency control
     if let inferenceFreq = config.inferenceFrequency, inferenceFreq > 0 {
       inferenceFrameInterval = 1.0 / Double(inferenceFreq)  // Convert to seconds
-      print(
-        "YOLOView: Inference frequency control enabled - target inference FPS: \(inferenceFreq), interval: \(inferenceFrameInterval! * 1000)ms"
-      )
     } else {
       inferenceFrameInterval = nil
-      print("YOLOView: Inference frequency control disabled")
     }
 
     // Setup frame skipping
     if let skipFrames = config.skipFrames, skipFrames > 0 {
       targetSkipFrames = skipFrames
       frameSkipCount = 0  // Reset counter
-      print("YOLOView: Frame skipping enabled - skip \(skipFrames) frames between inferences")
+
     } else {
       targetSkipFrames = 0
       frameSkipCount = 0
-      print("YOLOView: Frame skipping disabled")
+
     }
 
     // Initialize timing
@@ -1568,11 +1579,64 @@ extension YOLOView: AVCapturePhotoCaptureDelegate {
   /// Uses detection index correctly to avoid class index confusion
   private func convertResultToStreamData(_ result: YOLOResult) -> [String: Any] {
     var map: [String: Any] = [:]
-    guard let config = streamConfig else { return map }
+    let config = streamConfig ?? YOLOStreamConfig.DEFAULT
 
     // Convert detection results (if enabled)
     if config.includeDetections {
       var detections: [[String: Any]] = []
+
+      if config.includePoses && !result.keypointsList.isEmpty && result.boxes.isEmpty {
+        for (poseIndex, keypoints) in result.keypointsList.enumerated() {
+          var detection: [String: Any] = [:]
+          detection["classIndex"] = 0
+          detection["className"] = "person"
+          detection["confidence"] = 1.0
+          var minX = Float.greatestFiniteMagnitude
+          var minY = Float.greatestFiniteMagnitude
+          var maxX = -Float.greatestFiniteMagnitude
+          var maxY = -Float.greatestFiniteMagnitude
+
+          for kp in keypoints.xy {
+            if kp.x > 0 && kp.y > 0 {
+              minX = min(minX, kp.x)
+              minY = min(minY, kp.y)
+              maxX = max(maxX, kp.x)
+              maxY = max(maxY, kp.y)
+            }
+          }
+          let boundingBox: [String: Any] = [
+            "left": Double(minX),
+            "top": Double(minY),
+            "right": Double(maxX),
+            "bottom": Double(maxY),
+          ]
+          detection["boundingBox"] = boundingBox
+
+          // Normalized bounding box
+          let normalizedBox: [String: Any] = [
+            "left": Double(minX / Float(result.orig_shape.width)),
+            "top": Double(minY / Float(result.orig_shape.height)),
+            "right": Double(maxX / Float(result.orig_shape.width)),
+            "bottom": Double(maxY / Float(result.orig_shape.height)),
+          ]
+          detection["normalizedBox"] = normalizedBox
+
+          var keypointsFlat: [Double] = []
+          for i in 0..<keypoints.xy.count {
+            keypointsFlat.append(Double(keypoints.xy[i].x))
+            keypointsFlat.append(Double(keypoints.xy[i].y))
+            if i < keypoints.conf.count {
+              keypointsFlat.append(Double(keypoints.conf[i]))
+            } else {
+              keypointsFlat.append(0.0)
+            }
+          }
+          detection["keypoints"] = keypointsFlat
+          print("YOLOView: Added pose detection with \(keypoints.xy.count) keypoints")
+
+          detections.append(detection)
+        }
+      }
 
       // Convert detection boxes - CRITICAL: use detectionIndex, not class index
       for (detectionIndex, box) in result.boxes.enumerated() {
@@ -1609,9 +1673,7 @@ extension YOLOView: AVCapturePhotoCaptureDelegate {
               row.map { Double($0) }
             }
             detection["mask"] = maskDataDouble
-            print(
-              "YOLOView: ✅ Added mask data (\(maskData.count)x\(maskData.first?.count ?? 0)) for detection \(detectionIndex)"
-            )
+
           }
         }
 
@@ -1620,9 +1682,9 @@ extension YOLOView: AVCapturePhotoCaptureDelegate {
           let keypoints = result.keypointsList[detectionIndex]
           // Convert to flat array [x1, y1, conf1, x2, y2, conf2, ...]
           var keypointsFlat: [Double] = []
-          for i in 0..<keypoints.xyn.count {
-            keypointsFlat.append(Double(keypoints.xyn[i].x))
-            keypointsFlat.append(Double(keypoints.xyn[i].y))
+          for i in 0..<keypoints.xy.count {
+            keypointsFlat.append(Double(keypoints.xy[i].x))
+            keypointsFlat.append(Double(keypoints.xy[i].y))
             if i < keypoints.conf.count {
               keypointsFlat.append(Double(keypoints.conf[i]))
             } else {
@@ -1631,7 +1693,7 @@ extension YOLOView: AVCapturePhotoCaptureDelegate {
           }
           detection["keypoints"] = keypointsFlat
           print(
-            "YOLOView: Added keypoints data (\(keypoints.xyn.count) points) for detection \(detectionIndex)"
+            "YOLOView: Added keypoints data (\(keypoints.xy.count) points) for detection \(detectionIndex)"
           )
         }
 
@@ -1665,43 +1727,26 @@ extension YOLOView: AVCapturePhotoCaptureDelegate {
           ]
 
           detection["obb"] = obbDataMap
-          print(
-            "YOLOView: ✅ Added OBB data: \(obbResult.cls) (\(String(format: "%.1f", Double(obbBox.angle) * 180.0 / Double.pi))° rotation)"
-          )
         }
 
         detections.append(detection)
       }
-
       map["detections"] = detections
-      print("YOLOView: Converted \(detections.count) detections to stream data")
     }
 
     // Add performance metrics (if enabled)
     if config.includeProcessingTimeMs {
-      map["processingTimeMs"] = currentProcessingTime  // inference time in ms
-      print(
-        "YOLOView: 📊 Including processingTimeMs: \(currentProcessingTime) ms (includeProcessingTimeMs=\(config.includeProcessingTimeMs))"
-      )
-    } else {
-      print(
-        "YOLOView: ⚠️ Skipping processingTimeMs (includeProcessingTimeMs=\(config.includeProcessingTimeMs))"
-      )
+      map["processingTimeMs"] = result.speed * 1000
     }
 
     if config.includeFps {
-      map["fps"] = currentFps  // FPS value
-      print("YOLOView: 📊 Including fps: \(currentFps) (includeFps=\(config.includeFps))")
-    } else {
-      print("YOLOView: ⚠️ Skipping fps (includeFps=\(config.includeFps))")
+      map["fps"] = result.fps ?? 0.0
     }
 
-    // Add original image (if available and enabled)
     if config.includeOriginalImage {
-      if let pixelBuffer = currentBuffer {
-        if let imageData = convertPixelBufferToJPEGData(pixelBuffer) {
+      if let originalImage = result.originalImage {
+        if let imageData = originalImage.jpegData(compressionQuality: 0.9) {
           map["originalImage"] = imageData
-          print("YOLOView: ✅ Added original image data (\(imageData.count) bytes)")
         }
       }
     }
@@ -1709,12 +1754,4 @@ extension YOLOView: AVCapturePhotoCaptureDelegate {
     return map
   }
 
-  /// Convert CVPixelBuffer to JPEG data for streaming
-  private func convertPixelBufferToJPEGData(_ pixelBuffer: CVPixelBuffer) -> Data? {
-    let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-    let context = CIContext()
-    guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
-    let uiImage = UIImage(cgImage: cgImage)
-    return uiImage.jpegData(compressionQuality: 0.9)
-  }
 }

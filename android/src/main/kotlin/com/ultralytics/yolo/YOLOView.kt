@@ -220,7 +220,11 @@ class YOLOView @JvmOverloads constructor(
     private var confidenceThreshold = 0.25  // initial value
     private var iouThreshold = 0.45
     private var numItemsThreshold = 30
+    private var showOverlays = true
     private lateinit var zoomLabel: TextView
+    private lateinit var cameraButton: TextView
+    private lateinit var confidenceLabel: TextView
+    private var showUIControls = false
 
     init {
         // Clear any existing children
@@ -262,14 +266,59 @@ class YOLOView @JvmOverloads constructor(
             ).apply {
                 gravity = Gravity.CENTER
             }
-            text = "1.0x"
-            textSize = 24f
+            text = "ZOOM: 1.0x"
+            textSize = 28f
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(128, 0, 0, 0))
-            setPadding(16, 8, 16, 8)
+            setBackgroundColor(Color.argb(200, 255, 0, 0))
+            setPadding(20, 15, 20, 15)
             visibility = View.GONE
         }
         addView(zoomLabel)
+        zoomLabel.elevation = 1000f
+        
+        // Add camera switch button
+        cameraButton = TextView(context).apply {
+            layoutParams = LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = 100
+                rightMargin = 50
+            }
+            text = "📷 CAMERA"
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(200, 0, 100, 200))
+            setPadding(20, 15, 20, 15)
+            visibility = View.GONE
+            
+            setOnClickListener {
+                switchCamera()
+            }
+        }
+        addView(cameraButton)
+        cameraButton.elevation = 1000f
+        
+        // Add confidence threshold label
+        confidenceLabel = TextView(context).apply {
+            layoutParams = LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.BOTTOM or Gravity.START
+                bottomMargin = 100
+                leftMargin = 50
+            }
+            text = "Confidence: 0.50"
+            textSize = 20f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(200, 200, 100, 0))
+            setPadding(15, 10, 15, 10)
+            visibility = View.GONE
+        }
+        addView(confidenceLabel)
+        confidenceLabel.elevation = 1000f
         
         // Initialize scale gesture detector for pinch-to-zoom
         scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -297,17 +346,36 @@ class YOLOView @JvmOverloads constructor(
 
     fun setConfidenceThreshold(conf: Double) {
         confidenceThreshold = conf
-        (predictor as? ObjectDetector)?.setConfidenceThreshold(conf)
+        predictor?.setConfidenceThreshold(conf)
+        // Update the confidence label if UI controls are shown
+        if (showUIControls) {
+            post {
+                confidenceLabel.text = "Confidence: ${String.format("%.2f", conf)}"
+            }
+        }
     }
 
     fun setIouThreshold(iou: Double) {
         iouThreshold = iou
-        (predictor as? ObjectDetector)?.setIouThreshold(iou)
+        predictor?.setIouThreshold(iou)
     }
 
     fun setNumItemsThreshold(n: Int) {
         numItemsThreshold = n
-        (predictor as? ObjectDetector)?.setNumItemsThreshold(n)
+        predictor?.setNumItemsThreshold(n)
+    }
+    
+    fun setShowOverlays(show: Boolean) {
+        showOverlays = show
+    }
+    
+    fun setShowUIControls(show: Boolean) {
+        showUIControls = show
+        // Show/hide all UI controls
+        val visibility = if (show) View.VISIBLE else View.GONE
+        zoomLabel.visibility = visibility
+        cameraButton.visibility = visibility
+        confidenceLabel.visibility = visibility
     }
     
     fun setZoomLevel(zoomLevel: Float) {
@@ -331,15 +399,18 @@ class YOLOView @JvmOverloads constructor(
         Executors.newSingleThreadExecutor().execute {
             try {
                 val newPredictor = when (task) {
-                    YOLOTask.DETECT -> ObjectDetector(context, modelPath, loadLabels(modelPath), useGpu = useGpu).apply {
-                        setConfidenceThreshold(confidenceThreshold)
-                        setIouThreshold(iouThreshold)
-                        setNumItemsThreshold(numItemsThreshold)
-                    }
+                    YOLOTask.DETECT -> ObjectDetector(context, modelPath, loadLabels(modelPath), useGpu = useGpu)
                     YOLOTask.SEGMENT -> Segmenter(context, modelPath, loadLabels(modelPath), useGpu = useGpu)
                     YOLOTask.CLASSIFY -> Classifier(context, modelPath, loadLabels(modelPath), useGpu = useGpu)
                     YOLOTask.POSE -> PoseEstimator(context, modelPath, loadLabels(modelPath), useGpu = useGpu)
                     YOLOTask.OBB -> ObbDetector(context, modelPath, loadLabels(modelPath), useGpu = useGpu)
+                }
+                
+                // Apply thresholds to all predictor types
+                newPredictor.apply {
+                    setConfidenceThreshold(confidenceThreshold)
+                    setIouThreshold(iouThreshold)
+                    setNumItemsThreshold(numItemsThreshold)
                 }
 
                 post {
@@ -652,6 +723,10 @@ class YOLOView @JvmOverloads constructor(
             super.onDraw(canvas)
             val result = inferenceResult ?: return
             
+            // Only draw overlays if showOverlays is true
+            if (!showOverlays) {
+                return
+            }
 
             val iw = result.origShape.width.toFloat()
             val ih = result.origShape.height.toFloat()
@@ -1223,8 +1298,10 @@ class YOLOView @JvmOverloads constructor(
     // Scale listener for pinch-to-zoom
     private inner class ScaleListener : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-            // Show zoom label when pinch starts
-            zoomLabel.visibility = View.VISIBLE
+            // Show zoom label when pinch starts (only if UI controls are not permanently shown)
+            if (!showUIControls) {
+                zoomLabel.visibility = View.VISIBLE
+            }
             return true
         }
         
@@ -1246,10 +1323,12 @@ class YOLOView @JvmOverloads constructor(
         }
         
         override fun onScaleEnd(detector: ScaleGestureDetector) {
-            // Hide zoom label after 2 seconds
-            zoomLabel.postDelayed({
-                zoomLabel.visibility = View.GONE
-            }, 2000)
+            // Hide zoom label after 2 seconds (only if UI controls are not permanently shown)
+            if (!showUIControls) {
+                zoomLabel.postDelayed({
+                    zoomLabel.visibility = View.GONE
+                }, 2000)
+            }
         }
     }
     
@@ -1377,6 +1456,24 @@ class YOLOView @JvmOverloads constructor(
     }
     
     /**
+     * Flattens keypoints data into a single array format: [x1, y1, conf1, x2, y2, conf2, ...]
+     */
+    private fun flattenKeypoints(keypoints: Keypoints): List<Double> {
+        val flattened = mutableListOf<Double>()
+        for (i in keypoints.xy.indices) {
+            flattened.add(keypoints.xy[i].first.toDouble())
+            flattened.add(keypoints.xy[i].second.toDouble())
+            val confidence = if (i < keypoints.conf.size) {
+                keypoints.conf[i].toDouble()
+            } else {
+                0.0
+            }
+            flattened.add(confidence)
+        }
+        return flattened
+    }
+
+    /**
      * Convert YOLOResult to a Map for streaming (ported from archived YOLOPlatformView)
      * Uses detection index correctly to avoid class index confusion
      */
@@ -1387,6 +1484,48 @@ class YOLOView @JvmOverloads constructor(
         // Convert detection results (if enabled)
         if (config.includeDetections) {
             val detections = ArrayList<Map<String, Any>>()
+
+            if (config.includePoses && result.keypointsList.isNotEmpty() && result.boxes.isEmpty()) {
+                for ((poseIndex, keypoints) in result.keypointsList.withIndex()) {
+                    val detection = HashMap<String, Any>()
+                    detection["classIndex"] = 0
+                    detection["className"] = "person"
+                    detection["confidence"] = 1.0
+                    var minX = Float.MAX_VALUE
+                    var minY = Float.MAX_VALUE
+                    var maxX = Float.MIN_VALUE
+                    var maxY = Float.MIN_VALUE
+                    
+                    for (kp in keypoints.xy) {
+                        if (kp.first > 0 && kp.second > 0) {
+                            minX = minOf(minX, kp.first)
+                            minY = minOf(minY, kp.second)
+                            maxX = maxOf(maxX, kp.first)
+                            maxY = maxOf(maxY, kp.second)
+                        }
+                    }
+                    val boundingBox = HashMap<String, Any>()
+                    boundingBox["left"] = minX.toDouble()
+                    boundingBox["top"] = minY.toDouble()
+                    boundingBox["right"] = maxX.toDouble()
+                    boundingBox["bottom"] = maxY.toDouble()
+                    detection["boundingBox"] = boundingBox
+                    
+                    // Normalized bounding box
+                    val normalizedBox = HashMap<String, Any>()
+                    normalizedBox["left"] = (minX / result.origShape.width).toDouble()
+                    normalizedBox["top"] = (minY / result.origShape.height).toDouble()
+                    normalizedBox["right"] = (maxX / result.origShape.width).toDouble()
+                    normalizedBox["bottom"] = (maxY / result.origShape.height).toDouble()
+                    detection["normalizedBox"] = normalizedBox
+                    
+                    val keypointsFlat = flattenKeypoints(keypoints)
+                    detection["keypoints"] = keypointsFlat
+                    Log.d(TAG, "Added pose detection with ${keypoints.xy.size} keypoints")
+                    
+                    detections.add(detection)
+                }
+            }
             
             // Convert detection boxes - CRITICAL: use detectionIndex, not class index
             for ((detectionIndex, box) in result.boxes.withIndex()) {
@@ -1423,21 +1562,13 @@ class YOLOView @JvmOverloads constructor(
                 }
                 
                 // Add pose keypoints (if available and enabled)
-                if (config.includePoses && detectionIndex < result.keypointsList.size) {
-                    val keypoints = result.keypointsList[detectionIndex]
-                    // Convert to flat array [x1, y1, conf1, x2, y2, conf2, ...]
-                    val keypointsFlat = mutableListOf<Double>()
-                    for (i in keypoints.xy.indices) {
-                        keypointsFlat.add(keypoints.xy[i].first.toDouble())
-                        keypointsFlat.add(keypoints.xy[i].second.toDouble())
-                        if (i < keypoints.conf.size) {
-                            keypointsFlat.add(keypoints.conf[i].toDouble())
-                        } else {
-                            keypointsFlat.add(0.0) // Default confidence if missing
-                        }
+                if (config.includePoses && result.keypointsList.isNotEmpty()) {
+                    if (detectionIndex < result.keypointsList.size) {
+                        val keypoints = result.keypointsList[detectionIndex]
+                        val keypointsFlat = flattenKeypoints(keypoints)
+                        detection["keypoints"] = keypointsFlat
+                        Log.d(TAG, "Added keypoints data (${keypoints.xy.size} points) for detection $detectionIndex")
                     }
-                    detection["keypoints"] = keypointsFlat
-                    Log.d(TAG, "Added keypoints data (${keypoints.xy.size} points) for detection $detectionIndex")
                 }
                 
                 detections.add(detection)
@@ -1636,33 +1767,43 @@ class YOLOView @JvmOverloads constructor(
         Log.d(TAG, "YOLOView.stop() called - tearing down camera")
 
         try {
-            // 1) Unbind all use-cases
+            imageAnalysisUseCase?.clearAnalyzer()
             if (::cameraProviderFuture.isInitialized) {
-                val cameraProvider = cameraProviderFuture.get()
-                Log.d(TAG, "Unbinding all camera use cases")
-                cameraProvider.unbindAll()
+                try {
+                    val cameraProvider = cameraProviderFuture.get(1, TimeUnit.SECONDS)
+                    Log.d(TAG, "Unbinding all camera use cases")
+                    cameraProvider.unbindAll()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error getting camera provider for unbind", e)
+                }
             }
 
-            // 2) Clear the analyzer so no threads keep the camera alive
-            imageAnalysisUseCase?.clearAnalyzer()
             imageAnalysisUseCase = null
 
-            // 3) Detach the PreviewView surface
             previewUseCase?.setSurfaceProvider(null)
+            previewUseCase = null
 
-            // 4) Shutdown the executor
             cameraExecutor?.let { exec ->
                 Log.d(TAG, "Shutting down camera executor")
                 exec.shutdown()
-                if (!exec.awaitTermination(1, TimeUnit.SECONDS)) {
-                    Log.w(TAG, "Executor didn't shut down in time; forcing shutdown")
+                try {
+                    if (!exec.awaitTermination(500, TimeUnit.MILLISECONDS)) {
+                        Log.w(TAG, "Executor didn't shut down in time; forcing shutdown")
+                        exec.shutdownNow()
+                        if (!exec.awaitTermination(500, TimeUnit.MILLISECONDS)) {
+                            Log.e(TAG, "Executor failed to terminate after forced shutdown")
+                        }
+                    }
+                } catch (e: InterruptedException) {
+                    Log.e(TAG, "Interrupted while waiting for executor shutdown", e)
                     exec.shutdownNow()
+                    Thread.currentThread().interrupt()
                 }
             }
             cameraExecutor = null
 
-            // 5) Null out camera and inference machinery
             camera = null
+            (predictor as? BasePredictor)?.close()
             predictor = null
             inferenceCallback = null
             streamCallback = null
