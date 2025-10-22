@@ -8,15 +8,41 @@
 //  The YOLO class serves as the primary interface for loading and using YOLO machine learning models.
 //  It supports a variety of input formats including UIImage, CIImage, CGImage, and resource files.
 //  The class handles model loading, format conversion, and inference execution, offering a simple yet
-//  powerful API through Swift's callable object pattern. Users can load models from local bundles or
-//  file paths and perform inference with a single function call syntax, making integration into iOS
-//  applications straightforward.
+//  powerful API through Swift's callable object pattern.
+//
+//  Model Loading Priority:
+//  1. Absolute file paths (e.g., /Users/username/models/yolo.mlpackage)
+//  2. Relative paths with model extensions (e.g., models/yolo.mlpackage)
+//  3. Bundle resources by name (e.g., "yolo11n" searches for yolo11n.mlpackage in app bundle)
+//  4. Flutter assets (for backward compatibility with Flutter apps)
+//
+//  Supports loading models from anywhere in the file system, not just the app bundle.
 
 import Foundation
 import SwiftUI
 import UIKit
 
 /// The primary interface for working with YOLO models, supporting multiple input types and inference methods.
+///
+/// Example usage:
+/// ```swift
+/// // Load from app bundle
+/// let yolo1 = YOLO("yolo11n", task: .detect) { result in
+///   // handle result
+/// }
+///
+/// // Load from absolute path (e.g., Documents directory)
+/// let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+/// let modelPath = documentsPath.appendingPathComponent("my_model.mlpackage").path
+/// let yolo2 = YOLO(modelPath, task: .detect) { result in
+///   // handle result
+/// }
+///
+/// // Load from any file system location
+/// let yolo3 = YOLO("/Users/username/Downloads/custom_model.mlpackage", task: .segment) { result in
+///   // handle result
+/// }
+/// ```
 public class YOLO {
   var predictor: Predictor!
 
@@ -51,42 +77,68 @@ public class YOLO {
     let lowercasedPath = modelPathOrName.lowercased()
     let fileManager = FileManager.default
 
-    // 絶対パスのチェック - mlpackageディレクトリも処理
-    if lowercasedPath.hasSuffix(".mlmodel") || lowercasedPath.hasSuffix(".mlpackage") {
-      let possibleURL = URL(fileURLWithPath: modelPathOrName)
+    // Step 1: Check if it's an absolute file path (anywhere in the file system)
+    // This includes paths outside the app bundle like Documents, Downloads, etc.
+    if modelPathOrName.hasPrefix("/") || modelPathOrName.hasPrefix("file://") {
+      let absolutePath = modelPathOrName.hasPrefix("file://")
+        ? URL(string: modelPathOrName)?.path ?? modelPathOrName
+        : modelPathOrName
+
       var isDirectory: ObjCBool = false
-      if fileManager.fileExists(atPath: possibleURL.path, isDirectory: &isDirectory) {
-        // mlpackageはディレクトリ、mlmodelはファイル
+      if fileManager.fileExists(atPath: absolutePath, isDirectory: &isDirectory) {
+        let url = URL(fileURLWithPath: absolutePath)
+
+        // Validate the file extension matches the expected type
         if lowercasedPath.hasSuffix(".mlpackage") && isDirectory.boolValue {
-          modelURL = possibleURL
+          modelURL = url
+          print("YOLO.init: Found .mlpackage directory at absolute path: \(absolutePath)")
         } else if lowercasedPath.hasSuffix(".mlmodel") && !isDirectory.boolValue {
-          modelURL = possibleURL
+          modelURL = url
+          print("YOLO.init: Found .mlmodel file at absolute path: \(absolutePath)")
+        } else if lowercasedPath.hasSuffix(".mlmodelc") && isDirectory.boolValue {
+          modelURL = url
+          print("YOLO.init: Found .mlmodelc directory at absolute path: \(absolutePath)")
+        } else {
+          print("YOLO.init: File exists at \(absolutePath) but doesn't match expected type (isDirectory: \(isDirectory.boolValue))")
         }
-      }
-    } else {
-      // バンドル内のコンパイル済みモデルをチェック - これは既に実装済み
-      if let compiledURL = Bundle.main.url(forResource: modelPathOrName, withExtension: "mlmodelc")
-      {
-        modelURL = compiledURL
-      } else if let packageURL = Bundle.main.url(
-        forResource: modelPathOrName, withExtension: "mlpackage")
-      {
-        modelURL = packageURL
+      } else {
+        print("YOLO.init: Absolute path does not exist: \(absolutePath)")
       }
     }
 
-    // モデルURLがまだ見つからなかった場合は、Flutterアセットをチェック
-    if modelURL == nil {
-      print("YOLO Debug: Searching for model at path: \(modelPathOrName)")
-
-      // 絶対パスの場合はそのまま使用（ディレクトリもチェック）
+    // Step 2: Check if it has a model extension but isn't an absolute path
+    // (could be a relative path that should be treated as absolute)
+    if modelURL == nil && (lowercasedPath.hasSuffix(".mlmodel") || lowercasedPath.hasSuffix(".mlpackage") || lowercasedPath.hasSuffix(".mlmodelc")) {
+      let possibleURL = URL(fileURLWithPath: modelPathOrName)
       var isDirectory: ObjCBool = false
-      if fileManager.fileExists(atPath: modelPathOrName, isDirectory: &isDirectory) {
-        print(
-          "YOLO Debug: Found model at absolute path: \(modelPathOrName) (isDirectory: \(isDirectory.boolValue))"
-        )
-        modelURL = URL(fileURLWithPath: modelPathOrName)
+      if fileManager.fileExists(atPath: possibleURL.path, isDirectory: &isDirectory) {
+        if lowercasedPath.hasSuffix(".mlpackage") && isDirectory.boolValue {
+          modelURL = possibleURL
+          print("YOLO.init: Found .mlpackage directory at relative path: \(possibleURL.path)")
+        } else if lowercasedPath.hasSuffix(".mlmodel") && !isDirectory.boolValue {
+          modelURL = possibleURL
+          print("YOLO.init: Found .mlmodel file at relative path: \(possibleURL.path)")
+        } else if lowercasedPath.hasSuffix(".mlmodelc") && isDirectory.boolValue {
+          modelURL = possibleURL
+          print("YOLO.init: Found .mlmodelc directory at relative path: \(possibleURL.path)")
+        }
       }
+    }
+
+    // Step 3: Check in app bundle by resource name (no extension in path)
+    if modelURL == nil && !lowercasedPath.contains("/") {
+      if let compiledURL = Bundle.main.url(forResource: modelPathOrName, withExtension: "mlmodelc") {
+        modelURL = compiledURL
+        print("YOLO.init: Found .mlmodelc in bundle: \(modelPathOrName)")
+      } else if let packageURL = Bundle.main.url(forResource: modelPathOrName, withExtension: "mlpackage") {
+        modelURL = packageURL
+        print("YOLO.init: Found .mlpackage in bundle: \(modelPathOrName)")
+      }
+    }
+
+    // Step 4: Check for Flutter assets (for backward compatibility)
+    if modelURL == nil {
+      print("YOLO.init: Checking Flutter assets for: \(modelPathOrName)")
 
       // フォルダ構造を持つパスの場合
       if modelPathOrName.contains("/") && modelURL == nil {
