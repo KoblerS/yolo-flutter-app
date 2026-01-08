@@ -19,12 +19,18 @@ permissions:
 
 jobs:
   actions:
+    # Run with Python 3.13 as problems with docformatter on macOS-26 with Python 3.14
     runs-on: macos-26
     steps:
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
       - name: Run Ultralytics Actions
         uses: ultralytics/actions@main
         with:
           token: ${{ secrets._GITHUB_TOKEN || secrets.GITHUB_TOKEN }} # Auto-generated token
+          python-version: "3.13" # Pin to 3.13 to avoid Python 3.14 compatibility issues
           labels: true # Auto-label issues/PRs using AI
           python: true # Format Python with Ruff and docformatter
           prettier: true # Format YAML, JSON, Markdown, CSS

@@ -14,6 +14,9 @@ import 'package:ultralytics_yolo/config/channel_config.dart';
 import 'package:ultralytics_yolo/widgets/yolo_controller.dart';
 import 'package:ultralytics_yolo/widgets/yolo_overlay.dart';
 
+/// Enum for camera lens facing direction
+enum LensFacing { back, front }
+
 /// A Flutter widget that displays a real-time camera preview with YOLO object detection.
 class YOLOView extends StatefulWidget {
   final String modelPath;
@@ -31,6 +34,7 @@ class YOLOView extends StatefulWidget {
   final bool useGpu;
   final bool showOverlays;
   final YOLOOverlayTheme overlayTheme;
+  final LensFacing lensFacing;
 
   const YOLOView({
     super.key,
@@ -49,6 +53,7 @@ class YOLOView extends StatefulWidget {
     this.useGpu = true,
     this.showOverlays = true,
     this.overlayTheme = const YOLOOverlayTheme(),
+    this.lensFacing = LensFacing.back,
   });
 
   @override
@@ -130,9 +135,19 @@ class _YOLOViewState extends State<YOLOView> {
 
     try {
       final results = _parseDetectionResults(event);
-      setState(() {
-        _currentDetections = results;
-      });
+
+      if (widget.showOverlays && widget.onResult != null) {
+        if (_currentDetections.isNotEmpty) {
+          setState(() {
+            _currentDetections = [];
+          });
+        }
+      } else {
+        setState(() {
+          _currentDetections = results;
+        });
+      }
+
       widget.onResult!(results);
     } catch (e) {
       logInfo('YOLOView: Error parsing detection results: $e');
@@ -210,6 +225,22 @@ class _YOLOViewState extends State<YOLOView> {
       _subscribeToResults();
     }
 
+    if (!oldWidget.showOverlays &&
+        widget.showOverlays &&
+        widget.onResult != null) {
+      setState(() {
+        _currentDetections = [];
+      });
+    }
+
+    if (oldWidget.onResult == null &&
+        widget.onResult != null &&
+        widget.showOverlays) {
+      setState(() {
+        _currentDetections = [];
+      });
+    }
+
     // Handle model or task changes
     if (_platformViewId != null &&
         (oldWidget.modelPath != widget.modelPath ||
@@ -238,6 +269,7 @@ class _YOLOViewState extends State<YOLOView> {
     return Stack(
       children: [
         _buildCameraView(),
+
         if (widget.showOverlays && _currentDetections.isNotEmpty)
           YOLOOverlay(
             detections: _currentDetections,
@@ -287,6 +319,7 @@ class _YOLOViewState extends State<YOLOView> {
       'viewId': _viewId,
       'useGpu': widget.useGpu,
       'showOverlays': widget.showOverlays,
+      'lensFacing': widget.lensFacing.name,
     };
 
     if (widget.streamingConfig != null) {

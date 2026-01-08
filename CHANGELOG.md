@@ -1,3 +1,41 @@
+## 0.1.43
+
+- **Enhancement**: Unify classification output format across all platforms to use official Results.summary() format
+  - **Android**: Changed classification output to follow official Ultralytics Results.summary() format with `name`, `class`, `confidence` fields
+  - **iOS**: Unified classification output to use `name`, `class`, `confidence` instead of `topClass`, `topConfidence`
+  - **Format**: Classification results now follow the official format: `{name: String, class: Int, confidence: Double, top5: List}`
+- **Bug Fix**: Fix Android CLASSIFY FloatArray compatibility issue by adding `.toList()` conversion for `top5Confs` to ensure Iterable compatibility when handling FloatArray and fix array bounds issues in Android classification top5 list iteration
+
+## 0.1.42
+
+- **Feature**: Add `lensFacing` parameter to `YOLOView` for default camera selection
+  - Added `LensFacing` enum with `back` (default) and `front` values
+  - Added `lensFacing` parameter to `YOLOView` widget (defaults to `LensFacing.back`)
+  - **Android**: Added `setLensFacing()` method to `YOLOView` class
+  - **Android**: Reads `lensFacing` from creation params and sets camera facing before initialization
+  - **iOS**: Modified `YOLOView` init to accept `cameraPosition` parameter
+  - **iOS**: Reads `lensFacing` from creation params and passes correct camera position to init
+  - **Usage**: `YOLOView(lensFacing: LensFacing.front)` now starts with front camera by default
+  - **Backward Compatible**: Defaults to back camera if not specified, maintaining existing behavior
+  - **Example**: Updated example app controller to support `lensFacing` parameter
+
+## 0.1.41
+
+- **Bug Fix**: Fix `MissingPluginException` for default YOLO instances
+  - Fixed critical issue where creating YOLO instances without `useMultiInstance: true` resulted in `MissingPluginException: No implementation found for method predictSingleImage on channel yolo_single_image_channel_default`
+  - Modified `ChannelConfig.createChannel()` to treat `'default'` instance ID as null for backward compatibility
+  - The native side registers the default channel as `yolo_single_image_channel` without any suffix
+  - Now properly handles default instances by not appending `_default` suffix to channel name
+  - **Upgrade Note**: If you experienced `MissingPluginException` errors with v0.1.38+, this version resolves the issue
+
+## 0.1.40
+
+- **Bug Fix**: Fix double overlay rendering when using `onResult` callback with native overlays enabled
+  - **Root Cause**: When `showOverlays: true` and `onResult` callback was set, both native and Flutter overlays were rendering simultaneously, causing duplicate bounding boxes
+  - **Flutter**: Added safeguard to clear existing `_currentDetections` when double-overlay scenario is detected
+  - **Behavior**: Preserves original `showOverlays` contract (controls Flutter overlay) while preventing double rendering when native overlays are also enabled
+  - **Impact**: Eliminates duplicate bounding boxes, improves performance by reducing unnecessary setState calls, and maintains full callback functionality without breaking existing API contract
+
 ## 0.1.39
 
 - **Bug Fix**: Fix `showOverlays` parameter not hiding native platform bounding boxes
@@ -15,6 +53,7 @@
 ## 0.1.38
 
 - **Bug Fix**: iOS performance metrics not updating in `YOLOView`
+
   - Moved EventChannel subscription from `initState` to `_onPlatformViewCreated` to ensure native channel readiness on iOS
   - Aligned streaming config key with iOS by renaming `throttleInterval` to `throttleIntervalMs` when sending params
   - iOS now sources performance metrics from the latest inference result: `processingTimeMs = result.speed * 1000`, `fps = result.fps`
